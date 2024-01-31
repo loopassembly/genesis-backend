@@ -41,7 +41,8 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 
 type SignUpInput struct {
 	Name            string `json:"name" validate:"required"`
-	Email           string `json:"email" validate:"required"`
+	Email           string `json:"email" `
+	Dob             string `json:"dob" validate:"required"`  
 	Password        string `json:"password" validate:"required,min=8"`
 	PasswordConfirm string `json:"passwordConfirm" validate:"required,min=8"`
 	Photo           string `json:"photo"`

@@ -61,9 +61,9 @@ func SignUpUser(c *fiber.Ctx) error {
 
 	newUser := models.User{
 		Name:     payload.Name,
-		Email:    strings.ToLower(payload.Email),
 		Password: string(hashedPassword),
-		Photo:    &payload.Photo,
+		
+
 	}
 
 	result := initializers.DB.Create(&newUser)
@@ -76,10 +76,10 @@ func SignUpUser(c *fiber.Ctx) error {
 
 	// email
 	// The code below is from your initial code
-	config, _ := initializers.LoadConfig(".")
-	code := randstr.String(20)
-	verificationCode := utils.Encode(code)
-	newUser.VerificationCode = verificationCode
+	// config, _ := initializers.LoadConfig(".")
+	// code := randstr.String(20)
+	// verificationCode := utils.Encode(code)
+	// newUser.VerificationCode = verificationCode
 	initializers.DB.Save(&newUser)
 
 	var firstName = newUser.Name
@@ -87,26 +87,25 @@ func SignUpUser(c *fiber.Ctx) error {
 		firstName = strings.Split(firstName, " ")[1]
 	}
 
-	emailData := utils.EmailData{
-		URL:       config.ClientOrigin + "api/auth/verifyemail/" + code,
-		// URL:       "192.168.64.202:3000/api/auth/verifyemail/" + code,
-		FirstName: firstName,
-		Subject:   "Your account verification code",
-	}
-	// Debugging: Print the email content before sending
-	fmt.Println("Debug - Email Content:")
-	fmt.Printf("Subject: %s\n", emailData.Subject)
-	fmt.Printf("URL: %s\n", emailData.URL)
-	fmt.Printf("FirstName: %s\n", emailData.FirstName)
+	// emailData := utils.EmailData{
+	// 	URL:       config.ClientOrigin + "api/auth/verifyemail/" + code,
+	// 	// URL:       "192.168.64.202:3000/api/auth/verifyemail/" + code,
+	// 	FirstName: firstName,
+	// 	Subject:   "Your account verification code",
+	// }
+	// // Debugging: Print the email content before sending
+	// fmt.Println("Debug - Email Content:")
+	// fmt.Printf("Subject: %s\n", emailData.Subject)
+	// fmt.Printf("URL: %s\n", emailData.URL)
+	// fmt.Printf("FirstName: %s\n", emailData.FirstName)
 
 
-	utils.SendEmail(&newUser, &emailData, "verificationCode.html")
+	// utils.SendEmail(&newUser, &emailData, "verificationCode.html")
 
-	message := "We sent an email with a verification code to " + newUser.Email
+	// message := "We sent an email with a verification code to " + newUser.Email
 
 	// return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "success", "data": fiber.Map{"user": models.FilterUserRecord(&newUser)}})
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "success", "message": message})
-}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "success"})}
 
 
 
