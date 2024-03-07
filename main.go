@@ -1,20 +1,18 @@
-// main.go
 package main
 
 import (
 	"fmt"
 	"log"
 
+	"genesis/initializers"
+	"genesis/routes"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
-	"genesis/initializers"
-	"genesis/routes" // Import your new routes package
 	"github.com/gofiber/template/html/v2"
+	"github.com/gofiber/contrib/websocket"
 )
-
-
-
 
 func init() {
 	config, err := initializers.LoadConfig(".")
@@ -27,27 +25,31 @@ func init() {
 func main() {
 	engine := html.New("./templates", ".html")
 	app := fiber.New(fiber.Config{
-        Views: engine,
-    })
-	// app := fiber.New()
-	micro := fiber.New()
+		Views: engine,
+	})
 
-	app.Mount("/api", micro)
 	app.Use(logger.New())
-	// cors
-	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "http:/",
-		AllowHeaders:     "Origin, Content-Type, Accept",
-		AllowMethods:     "GET, POST",
-		AllowCredentials: true,
-	}))
+	app.Use(cors.New())
 
-	// Setup auth routes
+	// Setup WebSocket endpoint
+	app.Use("/ws", func(c *fiber.Ctx) error {
+        // IsWebSocketUpgrade returns true if the client
+        // requested an upgrade to the WebSocket protocol.
+        if websocket.IsWebSocketUpgrade(c) {
+            c.Locals("allowed", true)
+            return c.Next()
+        }
+        return fiber.ErrUpgradeRequired
+    })
+
+	// Your existing routes
+	micro := fiber.New()
+	app.Mount("/api", micro)
+
 	micro.Route("/auth", func(router fiber.Router) {
 		routes.SetupAuthRoutes(router)
 	})
 
-	// Setup user routes
 	micro.Route("/users", func(router fiber.Router) {
 		routes.SetupUserRoutes(router)
 	})
@@ -60,12 +62,10 @@ func main() {
 	})
 
 	app.Get("/", func(c *fiber.Ctx) error {
-        // Render index template
-        return c.Render("index", fiber.Map{
-            "Title": "Hello, World!",
-        })
-    })
-
+		return c.Render("index", fiber.Map{
+			"Title": "Hello, World!",
+		})
+	})
 
 	micro.All("*", func(c *fiber.Ctx) error {
 		path := c.Path()
@@ -75,6 +75,5 @@ func main() {
 		})
 	})
 
-	// log.Fatal(app.Listen(":3000"))
 	log.Fatal(app.Listen("0.0.0.0:3000"))
 }

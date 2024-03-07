@@ -12,17 +12,41 @@ type User struct {
 	ID       string  `gorm:"type:string;primary_key"`
 	Name     string  `gorm:"type:varchar(100);not null"`
 	Email    string  `gorm:"type:varchar(100);unique;not null"`
-	Password string  `gorm:"type:varchar(100);not null"`
+	Password string  `gorm:"type:varchar(100);"`
 	Role     *string `gorm:"type:varchar(50);default:'user';not null"`
 	Provider *string `gorm:"type:varchar(50);default:'local';not null"`
 	Photo    *string `gorm:"not null;default:'default.png'"`
 	Verified *bool   `gorm:"not null;default:false"`
+	Dob      string  `gorm:"type:varchar(100);"`
+	Clicked  bool    `gorm:"type:boolean;default:false"`
 	// VerificationCode string    `json:"verification_code,omitempty"` // ? This is for email verification
 	VerificationCode   string    `gorm:"type:varchar(100);"`
 	PasswordResetToken string    `gorm:"type:varchar(100);"`
 	PasswordResetAt    time.Time `gorm:"type:datetime;not null;default:CURRENT_TIMESTAMP"`
 	CreatedAt          time.Time `gorm:"type:datetime;not null;default:CURRENT_TIMESTAMP"`
 	UpdatedAt          time.Time `gorm:"type:datetime;not null;default:CURRENT_TIMESTAMP"`
+	Documents          []Document
+}
+
+type Document struct {
+    ID        uint      `gorm:"primaryKey"`
+    UserID    string    `gorm:"type:string;not null"`
+    FileName  string    `gorm:"type:varchar(255);not null"`
+    FilePath  string    `gorm:"type:varchar(255);not null"`
+    FileType  string    `gorm:"type:varchar(50);not null"`
+    CreatedAt time.Time `gorm:"type:datetime;not null;default:CURRENT_TIMESTAMP"`
+    UpdatedAt time.Time `gorm:"type:datetime;not null;default:CURRENT_TIMESTAMP"`
+}
+
+func (d *Document) BeforeCreate(tx *gorm.DB) error {
+    d.CreatedAt = time.Now()
+    d.UpdatedAt = time.Now()
+    return nil
+}
+
+func (d *Document) BeforeUpdate(tx *gorm.DB) error {
+    d.UpdatedAt = time.Now()
+    return nil
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) error {
@@ -40,12 +64,12 @@ func (u *User) BeforeCreate(tx *gorm.DB) error {
 }
 
 type SignUpInput struct {
-	Name            string `json:"name" validate:"required"`
-	Email           string `json:"email" `
-	Dob             string `json:"dob" validate:"required"`  
-	Password        string `json:"password" validate:"required,min=8"`
-	PasswordConfirm string `json:"passwordConfirm" validate:"required,min=8"`
-	Photo           string `json:"photo"`
+	Name  string `json:"name" validate:"required"`
+	Email string `json:"email" `
+	Dob   string `json:"dob" validate:"required"`
+	// Password        string `json:"password" validate:"required,min=8"`
+	// PasswordConfirm string `json:"passwordConfirm" validate:"required,min=8"`
+	Photo string `json:"photo"`
 }
 
 type SignInInput struct {

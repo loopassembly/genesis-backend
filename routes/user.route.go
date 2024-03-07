@@ -9,4 +9,5 @@ import (
 
 func SetupUserRoutes(router fiber.Router) {
 	router.Get("/me", middleware.DeserializeUser, controllers.GetMe)
-}
+	}
+

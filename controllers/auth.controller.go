@@ -5,10 +5,18 @@ import (
 	"genesis/initializers"
 	"genesis/models"
 	"genesis/utils"
+	// "io"
 	"log"
 	"net/http"
+	// "os"
+	"path/filepath"
 	"strings"
-	"sync"
+
+	// "github.com/gofiber/websocket/v2"
+	"github.com/gofiber/contrib/websocket"
+	"github.com/google/uuid"
+
+	// "sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -17,184 +25,139 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var clickedMutex sync.Mutex
-var clickedSignup bool
-var clickedSignin bool
-
-func SetClickedTrue() {
-    clickedMutex.Lock()
-    defer clickedMutex.Unlock()
-    clickedSignin = true
-	clickedSignup = true
-}
-
-func SetClickedFalse() {
-    clickedMutex.Lock()
-    defer clickedMutex.Unlock()
-    clickedSignin = false
-	clickedSignup = false
-}
-
-func SignUpUser(c *fiber.Ctx) error {
-	var payload *models.SignUpInput
-
-	if err := c.BodyParser(&payload); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": err.Error()})
-	}
-
-	errors := models.ValidateStruct(payload)
-	if errors != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "errors": errors})
-
-	}
-
-	if payload.Password != payload.PasswordConfirm {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": "Passwords do not match"})
-
-	}
-
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(payload.Password), bcrypt.DefaultCost)
-
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": err.Error()})
-	}
-
-	newUser := models.User{
-		Name:     payload.Name,
-		Password: string(hashedPassword),
-		
-
-	}
-
-	result := initializers.DB.Create(&newUser)
-
-	if result.Error != nil && strings.Contains(result.Error.Error(), "duplicate key value violates unique") {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"status": "fail", "message": "User with that email already exists"})
-	} else if result.Error != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"status": "error", "message": "Something bad happened"})
-	}
-
-	// email
-	// The code below is from your initial code
-	// config, _ := initializers.LoadConfig(".")
-	// code := randstr.String(20)
-	// verificationCode := utils.Encode(code)
-	// newUser.VerificationCode = verificationCode
-	initializers.DB.Save(&newUser)
-
-	var firstName = newUser.Name
-	if strings.Contains(firstName, " ") {
-		firstName = strings.Split(firstName, " ")[1]
-	}
-
-	// emailData := utils.EmailData{
-	// 	URL:       config.ClientOrigin + "api/auth/verifyemail/" + code,
-	// 	// URL:       "192.168.64.202:3000/api/auth/verifyemail/" + code,
-	// 	FirstName: firstName,
-	// 	Subject:   "Your account verification code",
-	// }
-	// // Debugging: Print the email content before sending
-	// fmt.Println("Debug - Email Content:")
-	// fmt.Printf("Subject: %s\n", emailData.Subject)
-	// fmt.Printf("URL: %s\n", emailData.URL)
-	// fmt.Printf("FirstName: %s\n", emailData.FirstName)
-
-
-	// utils.SendEmail(&newUser, &emailData, "verificationCode.html")
-
-	// message := "We sent an email with a verification code to " + newUser.Email
-
-	// return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "success", "data": fiber.Map{"user": models.FilterUserRecord(&newUser)}})
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"status": "success"})}
-
-
-
 func VerifyEmail(c *fiber.Ctx) error {
-	code := c.Params("verificationCode")
-	verificationCode := utils.Encode(code)
-	// fmt.Println(verificationCode)
-	var updatedUser models.User
-	result := initializers.DB.First(&updatedUser, "verification_code = ?", verificationCode)
-	if result.Error != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": "Invalid verification code or user doesn't exist"})
-	}
+    code := c.Params("verificationCode")
+    var existingUser models.User
+    result := initializers.DB.First(&existingUser, "verification_code = ?", code)
+    if result.Error != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": "Invalid verification code"})
+    }
 
-	if *updatedUser.Verified {
-		log.Println("clicked")
-		// clicked = true
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"status": "fail", "message": "User already verified"})
-	}
-	log.Println("clicked")
-	if updatedUser.Name == "" {
-		clickedSignup = true
-	}else{
-		clickedSignin = true
-	}
-	updatedUser.VerificationCode = ""
-	*updatedUser.Verified = true
-	initializers.DB.Save(&updatedUser)
+    // User exists and signup details are complete
 
-	// Render the email confirmation template
-	if err := renderConfirmationTemplate(c); err != nil {
-		log.Printf("Error rendering confirmation template: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"status": "error", "message": "Internal Server Error"})
-	}
+    // Set the Clicked field to true
+    existingUser.Clicked = true
 
-	return nil
+    // Clear the verification code
+    existingUser.VerificationCode = ""
+
+    // Set the Verified field to true
+	verify:=true
+    existingUser.Verified = &verify
+
+    // Update the user record in the database
+    if err := initializers.DB.Save(&existingUser).Error; err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"status": "error", "message": "Failed to update user"})
+    }
+
+    // Generate JWT token and log the user in
+    user := models.User{
+        ID: existingUser.ID,
+    }
+    config, _ := initializers.LoadConfig(".")
+    tokenByte := jwt.New(jwt.SigningMethodHS256)
+
+    now := time.Now().UTC()
+    claims := tokenByte.Claims.(jwt.MapClaims)
+
+    claims["sub"] = user.ID
+    claims["exp"] = now.Add(config.JwtExpiresIn).Unix()
+    claims["iat"] = now.Unix()
+    claims["nbf"] = now.Unix()
+
+    tokenString, err := tokenByte.SignedString([]byte(config.JwtSecret))
+
+    if err != nil {
+        return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"status": "fail", "message": fmt.Sprintf("generating JWT Token failed: %v", err)})
+    }
+
+    c.Cookie(&fiber.Cookie{
+        Name:     "token",
+        Value:    tokenString,
+        Path:     "/",
+        MaxAge:   config.JwtMaxAge * 60,
+        Secure:   false,
+        HTTPOnly: true,
+        Domain:   "localhost",
+    })
+
+    return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "message": "CLICKED", "token": tokenString})
 }
 
 
-func CheckVerificationBool(c *fiber.Ctx) error {
-	code := c.Params("Email")
-	clickedMutex.Lock()
-    defer clickedMutex.Unlock()
-	if clickedSignup || clickedSignin {
-		if clickedSignup {
 
-		clickedSignup = false
-		return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "message": "User signup clicked"})
-		}else{
-			user := models.User{
-				Email:    strings.ToLower(code),
-			}
-			config, _ := initializers.LoadConfig(".")
-			tokenByte := jwt.New(jwt.SigningMethodHS256)
+func HandleWebSocket(c *websocket.Conn) {
+    // Retrieve email from the websocket connection parameters
+    email := c.Params("email")
 
+    // Goroutine to continuously check if the user's Clicked field changes
+    go func() {
+        for {
+            // Retrieve the user with the specified email from the database
+            var existingUser models.User
+            result := initializers.DB.First(&existingUser, "email = ?", email)
+            if result.Error != nil {
+                log.Println("Error retrieving user:", result.Error)
+                return
+            }
 
-			now := time.Now().UTC()
-			claims := tokenByte.Claims.(jwt.MapClaims)
+            // Check if the user's Clicked field is true
+            if existingUser.Clicked {
+                // Check if the Name and Dob fields are not empty
+                if existingUser.Name != "" && existingUser.Dob != "" {
+                    // Send a message to the client indicating that the user has clicked
+                    message := []byte("User clicked")
+                    if err := c.WriteMessage(websocket.TextMessage, message); err != nil {
+                        log.Println("Error sending message:", err)
+                    }
+                } else {
+                    // Send a different message if either Name or Dob field is empty
+                    message := []byte("User details incomplete")
+                    if err := c.WriteMessage(websocket.TextMessage, message); err != nil {
+                        log.Println("Error sending message:", err)
+                    }
+                }
 
-			claims["sub"] = user.ID
-			claims["exp"] = now.Add(config.JwtExpiresIn).Unix()
-			claims["iat"] = now.Unix()
-			claims["nbf"] = now.Unix()
+                // Update the user's Clicked field to false
+                existingUser.Clicked = false
+                if err := initializers.DB.Save(&existingUser).Error; err != nil {
+                    log.Println("Error updating user:", err)
+                }
+            }
 
-			tokenString, err := tokenByte.SignedString([]byte(config.JwtSecret))
+            time.Sleep(2 * time.Second) // Check every 2 seconds
+        }
+    }()
 
-			if err != nil {
-				return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"status": "fail", "message": fmt.Sprintf("generating JWT Token failed: %v", err)})
-			}
+    // Goroutine to periodically send a "Hello" message to the client
+    // go func() {
+    //     ticker := time.NewTicker(2 * time.Second)
+    //     defer ticker.Stop()
 
-			c.Cookie(&fiber.Cookie{
-				Name:     "token",
-				Value:    tokenString,
-				Path:     "/",
-				MaxAge:   config.JwtMaxAge * 60,
-				Secure:   false,
-				HTTPOnly: true,
-				Domain:   "localhost",
-			})
-			clickedSignin = false
-			return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "message" : "user signin", "token": tokenString})
+    //     for {
+    //         select {
+    //         case <-ticker.C:
+    //             // Send a response back to the client
+    //             response := []byte("Hello")
+    //             if err := c.WriteMessage(websocket.TextMessage, response); err != nil {
+    //                 log.Println("write:", err)
+    //                 return
+    //             }
+    //         }
+    //     }
+    // }()
 
-
-				
-				
-		}
-	}
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "message": "User not clicked"})
+    // Handle incoming messages from the client
+    for {
+        _, _, err := c.ReadMessage()
+        if err != nil {
+            log.Println("read:", err)
+            break
+        }
+    }
 }
-	
+
+
 
 func ForgotPassword(c *fiber.Ctx) error {
 	var payload *models.ForgotPasswordInput
@@ -277,16 +240,13 @@ func ResetPassword(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(fiber.Map{"status": "success", "message": "Password data updated successfully"})
 }
 
-
-
 func renderConfirmationTemplate(c *fiber.Ctx) error {
-	
 
 	// Render the template and send the output to the client
 	return c.Render("index", fiber.Map{
 		"Title": "Hello, World!",
 	})
-	
+
 }
 
 func SignInUser(c *fiber.Ctx) error {
@@ -348,61 +308,76 @@ func SignInUser(c *fiber.Ctx) error {
 }
 
 func EmailCheck(c *fiber.Ctx) error {
-    var payload *models.SignInInput
+	var payload *models.SignInInput
 
-    if err := c.BodyParser(&payload); err != nil {
-        log.Print(err)
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": "Invalid request payload"})
-    }
+	if err := c.BodyParser(&payload); err != nil {
+		log.Print(err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": "Invalid request payload"})
+	}
 
-    // Assuming email is the only required field for authentication
-    email := strings.ToLower(payload.Email)
+	// Assuming email is the only required field for authentication
+	email := strings.ToLower(payload.Email)
 
-    var existingUser models.User
-    result := initializers.DB.First(&existingUser, "email = ?", email)
-    if result.RowsAffected > 0 {
-        // User already exists, update verification code and resend email
-config, _ := initializers.LoadConfig(".")
-code := randstr.String(20)
-verificationCode := utils.Encode(code)
-existingUser.Verified = new(bool)
-*existingUser.Verified = false
-existingUser.VerificationCode = verificationCode
-initializers.DB.Save(&existingUser)
+	var existingUser models.User
+	result := initializers.DB.First(&existingUser, "email = ?", email)
+	if result.RowsAffected > 0 {
+		// User already exists, update verification code and resend email
+		config, err := initializers.LoadConfig(".")
+		if err != nil {
+			log.Print(err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"status": "error", "message": "Internal Server Error"})
+		}
 
-emailData := utils.EmailData{
-	URL:     config.ClientOrigin + "api/auth/verifyemail/" + code,
-	Subject: "Your account verification code",
+		code := randstr.String(20)
+		verificationCode := utils.Encode(code)
+		existingUser.Verified = new(bool)
+		*existingUser.Verified = false
+		existingUser.VerificationCode = verificationCode
+		if err := initializers.DB.Save(&existingUser).Error; err != nil {
+			log.Print(err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"status": "error", "message": "Internal Server Error"})
+		}
+
+		emailData := utils.EmailData{
+			URL:     config.ClientOrigin + "api/auth/verifyemail/" + verificationCode,
+			Subject: "Your account verification code",
+		}
+		utils.SendEmail(&existingUser, &emailData, "verificationCode.html")
+
+		message := "We sent an email with a new verification code to " + existingUser.Email
+
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "message": message})
+	}
+
+	// User doesn't exist, create a new user and send verification email
+	newUser := models.User{
+		Email: strings.ToLower(email),
+	}
+
+	config, err := initializers.LoadConfig(".")
+	if err != nil {
+		log.Print(err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"status": "error", "message": "Internal Server Error"})
+	}
+
+	code := randstr.String(20)
+	verificationCode := utils.Encode(code)
+	newUser.VerificationCode = verificationCode
+	if err := initializers.DB.Save(&newUser).Error; err != nil {
+		log.Print(err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"status": "error", "message": "Internal Server Error"})
+	}
+
+	emailData := utils.EmailData{
+		URL:     config.ClientOrigin + "api/auth/verifyemail/" + verificationCode,
+		Subject: "Your account verification code",
+	}
+	utils.SendEmail(&newUser, &emailData, "verificationCode.html")
+
+	message := "We sent an email with a verification code to " + newUser.Email
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "message": message})
 }
-utils.SendEmail(&existingUser, &emailData, "verificationCode.html")
-
-message := "We sent an email with a new verification code to " + existingUser.Email
-
-        return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "message": message})
-    }
-
-    // User doesn't exist, create a new user and send verification email
-    newUser := models.User{
-        Email: strings.ToLower(email),
-    }
-
-    config, _ := initializers.LoadConfig(".")
-    code := randstr.String(20)
-    verificationCode := utils.Encode(code)
-    newUser.VerificationCode = verificationCode
-    initializers.DB.Save(&newUser)
-
-    emailData := utils.EmailData{
-        URL:     config.ClientOrigin + "api/auth/verifyemail/" + code,
-        Subject: "Your account verification code",
-    }
-    utils.SendEmail(&newUser, &emailData, "verificationCode.html")
-
-    message := "We sent an email with a verification code to " + newUser.Email
-
-    return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "message": message})
-}
-
 
 func LogoutUser(c *fiber.Ctx) error {
 	expired := time.Now().Add(-time.Hour * 24)
@@ -415,31 +390,77 @@ func LogoutUser(c *fiber.Ctx) error {
 }
 
 
-// func GetEmailVerification(c *fiber.Ctx) error {
-// 	var payload *models.SignInInput
 
-//     if err := c.BodyParser(&payload); err != nil {
-//         return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": err.Error()})
-//     }
+func UploadFile(c *fiber.Ctx) error {
+	// Parse the form data
+	form, err := c.MultipartForm()
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Failed to parse form data"})
+	}
 
-//     // Assuming email is the only required field for authentication
-//     email := strings.ToLower(payload.Email)
+	// Access the user information from the request context
+	user := c.Locals("user").(models.UserResponse)
 
-//     var user models.User
-//     result := initializers.DB.First(&user, "email = ?", email)
-//     if result.Error != nil {
-//         return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": "Invalid email"})
-//     }
+	// Access the files from the form data
+	files := form.File["files"]
 
-//     if !*user.Verified {
-//         return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "fail", "message": "Email not verified"})
-//     }
+	// Process each file
+	for _, file := range files {
+		// Open the uploaded file
+		src, err := file.Open()
+		if err != nil {
+			return err
+		}
+		defer src.Close()
 
-// 	config,_:=initializers.LoadConfig(".")
+		// Generate a unique file name
+		fileName := GenerateFileName(file.Filename)
 
+		// Construct the file path
+		filePath := filepath.Join("uploads", user.ID.String(), fileName)
 
+		// Create the file record in the database
+		fileRecord := models.Document{
+			UserID:   user.ID.String(),
+			FileName: fileName,
+			FilePath: filePath,
+			FileType: GetFileType(file.Filename),
+		}
 
-	
-// }
+		// Save the file record to the database
+		if err := models.DB.Create(&fileRecord).Error; err != nil {
+			return err
+		}
 
+		// Save the file to the specified path
+		if err := c.SaveFile(file, filePath); err != nil {
+			return err
+		}
+	}
 
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Files uploaded successfully"})
+}
+
+// GenerateFileName generates a unique file name for uploaded files
+func GenerateFileName(originalName string) string {
+	// Generate a unique file name based on the original file name
+	fileExt := filepath.Ext(originalName)
+	fileName := strings.TrimSuffix(originalName, fileExt)
+	uniqueID := uuid.New().String()
+	return fmt.Sprintf("%s_%s%s", fileName, uniqueID, fileExt)
+}
+
+// GetFileType returns the type of the file based on its extension
+func GetFileType(fileName string) string {
+	extension := filepath.Ext(fileName)
+	switch strings.ToLower(extension) {
+	case ".jpg", ".jpeg", ".png", ".gif":
+		return "image"
+	case ".pdf":
+		return "pdf"
+	case ".doc", ".docx":
+		return "document"
+	default:
+		return "other"
+	}
+}
